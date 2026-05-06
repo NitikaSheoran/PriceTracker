@@ -24,7 +24,7 @@ export async function GET(request: Request) {
         // Scrape product
         console.log("currentProduct(/api/cron/route.ts/GET):: ", currentProduct)
         const scrapedProduct = await scrapeAmazonProduct(currentProduct.url);
-        console.log("Scraped Product (/api/cron/route.ts/GET):: ", scrapedProduct)
+        // console.log("Scraped Product (/api/cron/route.ts/GET):: ", scrapedProduct)
 
         if (!scrapedProduct) return;
 
