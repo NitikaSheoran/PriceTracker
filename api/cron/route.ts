@@ -35,7 +35,7 @@ export async function GET(request: Request) {
           { price: scrapedProduct.currentPrice }
         ].slice(-MAX_HISTORY);
 
-        console.log("updated Price History(/api/cron/route.ts/GET):: ", updatedPriceHistory)
+        // console.log("updated Price History(/api/cron/route.ts/GET):: ", updatedPriceHistory)
 
         const product = {
           ...scrapedProduct,
