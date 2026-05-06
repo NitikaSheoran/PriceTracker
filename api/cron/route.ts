@@ -28,12 +28,12 @@ export async function GET(request: Request) {
 
         if (!scrapedProduct) return;
 
+        const MAX_HISTORY = 50;
+
         const updatedPriceHistory = [
           ...currentProduct.priceHistory,
-          {
-            price: scrapedProduct.currentPrice,
-          },
-        ];
+          { price: scrapedProduct.currentPrice }
+        ].slice(-MAX_HISTORY);
 
         console.log("updated Price History(/api/cron/route.ts/GET):: ", updatedPriceHistory)
 
@@ -56,13 +56,13 @@ export async function GET(request: Request) {
          console.log("updated Product(/api/cron/route.ts/GET):: ", updatedProduct);
         // ======================== 2 CHECK EACH PRODUCT'S STATUS & SEND EMAIL ACCORDINGLY
         const emailNotifType = getEmailNotifType(
-          scrapedProduct,
+          product,
           currentProduct
         );
         console.log("Email Type(/api/cron/route.ts/GET)::", emailNotifType);
         console.log("Users(/api/cron/route.ts/GET)::", updatedProduct.users);
 
-        if (emailNotifType && updatedProduct.users.length > 0) {
+        if (emailNotifType && updatedProduct?.users?.length > 0) {
           const productInfo = {
             title: updatedProduct.title,
             url: updatedProduct.url,
