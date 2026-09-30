@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 
 const productSchema = new mongoose.Schema({
-  url: { type: String, required: true, unique: true },
+  url: { type: String, required: true, unique: true, trim: true },
   currency: { type: String, required: true },
   image: { type: String, required: true },
   title: { type: String, required: true },
@@ -20,8 +20,10 @@ const productSchema = new mongoose.Schema({
   averagePrice: Number,
 
   discountRate: Number,
-  category: String,
-  reviewsCount: String,
+  category: {type: String, default: "unknown"},
+  reviewsCount: Number,
+
+  stars: {type: Number},
 
   isOutOfStock: {
     type: Boolean,

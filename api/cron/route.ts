@@ -1,90 +1,266 @@
 import { NextResponse } from "next/server";
 
-import { getLowestPrice, getHighestPrice, getAveragePrice, getEmailNotifType } from "@/lib/utils";
-import { connectToDB } from "@/lib/mongoose";
-import Product from "@/lib/Models/product.model";
-import { scrapeAmazonProduct } from "@/lib/scraper";
-import { generateEmailBody, sendEmail } from "@/lib/nodemailer";
+import {
+  getLowestPrice,
+  getHighestPrice,
+  getAveragePrice,
+  getEmailNotifType,
+} from "@/lib/utils";
 
-export const maxDuration = 300; // This function can run for a maximum of 300 seconds
-export const dynamic = "force-dynamic";
+import { connectToDB } from "@/lib/mongoose";
+
+import Product from "@/lib/Models/product.model";
+
+import { scrapeAmazonProduct } from "@/lib/scraper";
+
+import {
+  generateEmailBody,
+  sendEmail,
+} from "@/lib/nodemailer";
+
+export const maxDuration = 300;
+
+export const dynamic =
+  "force-dynamic";
+
 export const revalidate = 0;
 
-export async function GET(request: Request) {
+export async function GET(
+  request: Request
+) {
   try {
     await connectToDB();
 
-    const products = await Product.find({});
+    const products =
+      await Product.find();
 
-    if (!products) throw new Error("No product fetched");
+    if (!products.length) {
+      return NextResponse.json({
+        message:
+          "No products to update",
+        data: [],
+      });
+    }
 
-    // ======================== 1 SCRAPE LATEST PRODUCT DETAILS & UPDATE DB
-    const updatedProducts = await Promise.all(
-      products.map(async (currentProduct) => {
-        // Scrape product
-        console.log("currentProduct(/api/cron/route.ts/GET):: ", currentProduct)
-        const scrapedProduct = await scrapeAmazonProduct(currentProduct.url);
-        // console.log("Scraped Product (/api/cron/route.ts/GET):: ", scrapedProduct)
+    const updatedProducts =
+      await Promise.all(
+        products.map(
+          async (currentProduct) => {
+            try {
+              console.log(
+                "Checking:",
+                currentProduct.url
+              );
 
-        if (!scrapedProduct) return;
+              /**
+               * Scrape latest data.
+               */
+              const scrapedProduct =
+                await scrapeAmazonProduct(
+                  currentProduct.url
+                );
 
-        const MAX_HISTORY = 50;
+              if (!scrapedProduct) {
+                return null;
+              }
 
-        const updatedPriceHistory = [
-          ...currentProduct.priceHistory,
-          { price: scrapedProduct.currentPrice }
-        ].slice(-MAX_HISTORY);
+              /**
+               * Previous price.
+               */
+              const lastPrice =
+                currentProduct.priceHistory.at(
+                  -1
+                )?.price;
 
-        // console.log("updated Price History(/api/cron/route.ts/GET):: ", updatedPriceHistory)
+              /**
+               * Only add history entry
+               * when price changed.
+               */
+              let updatedPriceHistory =
+                currentProduct.priceHistory.map(
+                  (item: any) => ({
+                    price: item.price,
+                    date: item.date,
+                  })
+                );
 
-        const product = {
-          ...scrapedProduct,
-          priceHistory: updatedPriceHistory,
-          lowestPrice: getLowestPrice(updatedPriceHistory),
-          highestPrice: getHighestPrice(updatedPriceHistory),
-          averagePrice: getAveragePrice(updatedPriceHistory),
-        };
+              if (
+                lastPrice !==
+                scrapedProduct.currentPrice
+              ) {
+                updatedPriceHistory.push({
+                  price:
+                    scrapedProduct.currentPrice,
 
-        // Update Products in DB
-        const updatedProduct = await Product.findOneAndUpdate(
-          {
-            url: product.url,
-          },
-          product,
-          { new: true }
-        );
-         console.log("updated Product(/api/cron/route.ts/GET):: ", updatedProduct);
-        // ======================== 2 CHECK EACH PRODUCT'S STATUS & SEND EMAIL ACCORDINGLY
-        const emailNotifType = getEmailNotifType(
-          product,
-          currentProduct
-        );
-        console.log("Email Type(/api/cron/route.ts/GET)::", emailNotifType);
-        console.log("Users(/api/cron/route.ts/GET)::", updatedProduct.users);
+                  date: new Date(),
+                });
+              }
 
-        if (emailNotifType && updatedProduct?.users?.length > 0) {
-          const productInfo = {
-            title: updatedProduct.title,
-            url: updatedProduct.url,
-          };
-          // Construct emailContent
-          const emailContent = await generateEmailBody(productInfo, emailNotifType);
-          // Get array of user emails
-          const userEmails = updatedProduct.users.map((user: any) => user.email);
-          // Send email notification
-          console.log("user Emails(/api/cron/route.ts/GET):: ", userEmails)
-          await sendEmail(emailContent, userEmails);
-        }
+              /**
+               * Keep last 50 records.
+               */
+              updatedPriceHistory =
+                updatedPriceHistory.slice(
+                  -50
+                );
 
-        return updatedProduct;
-      })
-    );
+              /**
+               * Check notification BEFORE
+               * updating currentProduct.
+               *
+               * This is important because we
+               * need the old historical state.
+               */
+              const productForNotification =
+                {
+                  ...scrapedProduct,
+
+                  _id:
+                    currentProduct._id.toString(),
+
+                  priceHistory:
+                    currentProduct.priceHistory,
+
+                  lowestPrice:
+                    currentProduct.lowestPrice,
+
+                  highestPrice:
+                    currentProduct.highestPrice,
+
+                  averagePrice:
+                    currentProduct.averagePrice,
+
+                  users:
+                    currentProduct.users,
+                };
+
+              const emailNotifType =
+                getEmailNotifType(
+                  productForNotification as any,
+                  currentProduct.toObject()
+                );
+
+              /**
+               * Prepare updated product.
+               */
+              const updatedData = {
+                ...scrapedProduct,
+
+                priceHistory:
+                  updatedPriceHistory,
+
+                lowestPrice:
+                  getLowestPrice(
+                    updatedPriceHistory
+                  ),
+
+                highestPrice:
+                  getHighestPrice(
+                    updatedPriceHistory
+                  ),
+
+                averagePrice:
+                  getAveragePrice(
+                    updatedPriceHistory
+                  ),
+              };
+
+              /**
+               * Update DB.
+               */
+              const updatedProduct =
+                await Product.findOneAndUpdate(
+                  {
+                    url: currentProduct.url,
+                  },
+                  updatedData,
+                  {
+                    new: true,
+                  }
+                );
+
+              if (!updatedProduct) {
+                return null;
+              }
+
+              console.log(
+                "Updated product:",
+                updatedProduct.title
+              );
+
+              /**
+               * Send notification.
+               */
+              if (
+                emailNotifType &&
+                updatedProduct.users
+                  ?.length
+              ) {
+                const productInfo = {
+                  title:
+                    updatedProduct.title,
+
+                  url:
+                    updatedProduct.url,
+                };
+
+                const emailContent =
+                  await generateEmailBody(
+                    productInfo,
+                    emailNotifType
+                  );
+
+                const userEmails =
+                  updatedProduct.users.map(
+                    (user: any) =>
+                      user.email
+                  );
+
+                await sendEmail(
+                  emailContent,
+                  userEmails
+                );
+              }
+
+              return updatedProduct;
+            } catch (error) {
+              console.error(
+                `Failed to update ${currentProduct.url}:`,
+                error
+              );
+
+              return null;
+            }
+          }
+        )
+      );
 
     return NextResponse.json({
-      message: "Ok",
-      data: updatedProducts,
+      message:
+        "Products checked successfully",
+
+      data: updatedProducts.filter(
+        Boolean
+      ),
     });
   } catch (error: any) {
-    throw new Error(`Failed to get all products: ${error.message}`);
+    console.error(
+      "Cron error:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        message:
+          "Failed to update products",
+
+        error:
+          error?.message ||
+          "Unknown error",
+      },
+      {
+        status: 500,
+      }
+    );
   }
 }

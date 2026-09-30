@@ -1,24 +1,32 @@
-"use server"
+"use server";
 
-import { EmailContent, EmailProductInfo, NotificationType } from '@/types';
-import nodemailer from 'nodemailer';
+import dns from "node:dns";
+import nodemailer from "nodemailer";
+
+import type {
+  EmailContent,
+  EmailProductInfo,
+  NotificationType,
+} from "@/types";
+
+dns.setDefaultResultOrder("ipv4first");
 
 const Notification = {
-  WELCOME: 'WELCOME',
-  CHANGE_OF_STOCK: 'CHANGE_OF_STOCK',
-  LOWEST_PRICE: 'LOWEST_PRICE',
-  THRESHOLD_MET: 'THRESHOLD_MET',
-}
+  WELCOME: "WELCOME",
+  CHANGE_OF_STOCK: "CHANGE_OF_STOCK",
+  LOWEST_PRICE: "LOWEST_PRICE",
+  THRESHOLD_MET: "THRESHOLD_MET",
+} as const;
 
 export async function generateEmailBody(
   product: EmailProductInfo,
   type: NotificationType
-  ) {
+): Promise<EmailContent> {
   const THRESHOLD_PERCENTAGE = 40;
-  // Shorten the product title
+
   const shortenedTitle =
-    product.title.length > 20
-      ? `${product.title.substring(0, 20)}...`
+    product.title.length > 50
+      ? `${product.title.substring(0, 50)}...`
       : product.title;
 
   let subject = "";
@@ -26,55 +34,80 @@ export async function generateEmailBody(
 
   switch (type) {
     case Notification.WELCOME:
-      subject = `Welcome to Price Tracking for ${shortenedTitle}`;
+      subject = `Welcome to PriceWise - ${shortenedTitle}`;
       body = `
         <div>
           <h2>Welcome to PriceWise 🚀</h2>
-          <p>You are now tracking ${product.title}.</p>
-          <p>Here's an example of how you'll receive updates:</p>
-          <div style="border: 1px solid #ccc; padding: 10px; background-color: #f8f8f8;">
-            <h3>${product.title} is back in stock!</h3>
-            <p>We're excited to let you know that ${product.title} is now back in stock.</p>
-            <p>Don't miss out - <a href="${product.url}" target="_blank" rel="noopener noreferrer">buy it now</a>!</p>
-            <img src="https://i.ibb.co/pwFBRMC/Screenshot-2023-09-26-at-1-47-50-AM.png" alt="Product Image" style="max-width: 100%;" />
-          </div>
-          <p>Stay tuned for more updates on ${product.title} and other products you're tracking.</p>
+          <p>
+            You are now tracking:
+            <strong>${product.title}</strong>
+          </p>
+          <p>
+            We will notify you when there is an important
+            change in price, stock availability, or discount.
+          </p>
+          <p>
+            <a href="${product.url}" target="_blank">
+              View Product
+            </a>
+          </p>
         </div>
       `;
       break;
 
     case Notification.CHANGE_OF_STOCK:
-      subject = `${shortenedTitle} is now back in stock!`;
+      subject = `${shortenedTitle} is back in stock!`;
       body = `
         <div>
-          <h4>Hey, ${product.title} is now restocked! Grab yours before they run out again!</h4>
-          <p>See the product <a href="${product.url}" target="_blank" rel="noopener noreferrer">here</a>.</p>
+          <h3>${product.title} is now back in stock!</h3>
+          <p>The product is available again.</p>
+          <p>
+            <a href="${product.url}" target="_blank">
+              View Product
+            </a>
+          </p>
         </div>
       `;
       break;
 
     case Notification.LOWEST_PRICE:
-      subject = `Lowest Price Alert for ${shortenedTitle}`;
+      subject = `Lowest Price Alert - ${shortenedTitle}`;
       body = `
         <div>
-          <h4>Hey, ${product.title} has reached its lowest price ever!!</h4>
-          <p>Grab the product <a href="${product.url}" target="_blank" rel="noopener noreferrer">here</a> now.</p>
+          <h3>
+            ${product.title} has reached a new historical low price!
+          </h3>
+          <p>
+            This is the lowest price recorded by PriceWise.
+          </p>
+          <p>
+            <a href="${product.url}" target="_blank">
+              View Product
+            </a>
+          </p>
         </div>
       `;
       break;
 
     case Notification.THRESHOLD_MET:
-      subject = `Discount Alert for ${shortenedTitle}`;
+      subject = `Discount Alert - ${shortenedTitle}`;
       body = `
         <div>
-          <h4>Hey, ${product.title} is now available at a discount more than ${THRESHOLD_PERCENTAGE}%!</h4>
-          <p>Grab it right away from <a href="${product.url}" target="_blank" rel="noopener noreferrer">here</a>.</p>
+          <h3>
+            ${product.title} now has a discount of
+            ${THRESHOLD_PERCENTAGE}% or more!
+          </h3>
+          <p>
+            <a href="${product.url}" target="_blank">
+              View Product
+            </a>
+          </p>
         </div>
       `;
       break;
 
     default:
-      throw new Error("Invalid notification type.");
+      throw new Error("Invalid notification type");
   }
 
   return { subject, body };
@@ -82,39 +115,124 @@ export async function generateEmailBody(
 
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
+  port: 587,
+  secure: false,
+  requireTLS: true,
+
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD,
   },
+
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 20000,
 });
 
-export const sendEmail = async (emailContent: EmailContent, sendTo: string[]) => {
+export async function verifyEmailConnection() {
   try {
-    console.log("Sending to(/nodemailer/index.ts/sendMail):", sendTo);
-    const validEmails = sendTo.filter(
-      (email) => email && email.includes("@")
-    );
-    if (!validEmails.length) {
-      console.log("No recipients provided");
-      return;
+    if (
+      !process.env.GMAIL_USER ||
+      !process.env.GMAIL_APP_PASSWORD
+    ) {
+      throw new Error(
+        "GMAIL_USER or GMAIL_APP_PASSWORD is missing"
+      );
     }
-    const info = await transporter.sendMail({
-      from: `"PriceWise" <${process.env.GMAIL_USER}>`,
-      to: validEmails,
-      subject: emailContent.subject,
-      html: emailContent.body,
-    
-    // const info = await transporter.sendMail({
-    //   from: process.env.GMAIL_USER,
-    //   to: process.env.GMAIL_USER,
-    //   subject: "Test Mail",
-    //   text: "Hello from Nodemailer",
+
+    await transporter.verify();
+
+    console.log(
+      "✅ Gmail SMTP connection successful"
+    );
+
+    return {
+      success: true,
+      message: "SMTP connection successful",
+    };
+  } catch (error: any) {
+    console.error(
+      "❌ Gmail SMTP connection failed:",
+      error
+    );
+
+    return {
+      success: false,
+      message:
+        error?.message ||
+        "SMTP connection failed",
+    };
+  }
+}
+
+export async function sendEmail(
+  emailContent: EmailContent,
+  sendTo: string[]
+) {
+  try {
+    const gmailUser =
+      process.env.GMAIL_USER;
+
+    const gmailPassword =
+      process.env.GMAIL_APP_PASSWORD;
+
+    if (!gmailUser || !gmailPassword) {
+      throw new Error(
+        "Gmail credentials are not configured"
+      );
+    }
+
+    const validEmails = sendTo
+      .map((email) => email.trim())
+      .filter((email) =>
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+      );
+
+    if (!validEmails.length) {
+      throw new Error(
+        "No valid recipient email address"
+      );
+    }
+
+    console.log(
+      "📧 Sending email to:",
+      validEmails
+    );
+
+    const info =
+      await transporter.sendMail({
+        from: `"PriceWise" <${gmailUser}>`,
+        to: validEmails,
+        subject: emailContent.subject,
+        html: emailContent.body,
       });
 
-    console.log("Email sent(/nodemailer/index.ts/sendMail):", info.response);
-  } catch (error) {
-    console.error("Email error:", error);
+    console.log(
+      "✅ Email sent successfully"
+    );
+
+    console.log(
+      "Message ID:",
+      info.messageId
+    );
+
+    return {
+      success: true,
+      message:
+        "Email sent successfully",
+      messageId: info.messageId,
+    };
+  } catch (error: any) {
+    console.error(
+      "❌ Email sending failed:",
+      error
+    );
+
+    return {
+      success: false,
+      message:
+        error?.message ||
+        "Failed to send email",
+    };
   }
-};
+}
